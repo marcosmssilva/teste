@@ -1,0 +1,99 @@
+  pipeline {
+  parameters {
+    string(name: 'DEV_PROJECT_NAME', description: 'What is the development project name?')  
+    string(name: 'HML_PROJECT_NAME', description: 'What is the test project name?')
+    string(name: 'PRD_PROJECT_NAME', description: 'What is the production project name?')
+    string(name: 'APP_NAME', description: 'What is the application name?')
+  }
+  agent any
+  stages {
+    stage('Retrieve Image Stream') {
+      steps {
+        script {
+          openshift.withCluster() {
+            //openshift.verbose()
+            openshift.withProject("${PRD_PROJECT_NAME}") {
+              echo "Using project: ${openshift.project()}"
+              openshift.raw("import-image", "${PRD_PROJECT_NAME}/${APP_NAME}", "--from=\'docker-registry.default.svc:5000/${DEV_PROJECT_NAME}/${APP_NAME}\'", "--confirm")
+            }
+          }
+        }
+      }
+    }
+    stage('Promote to PRD') {
+      steps {
+        script {
+          openshift.withCluster() {
+            //openshift.verbose()
+            openshift.withProject("${PRD_PROJECT_NAME}") {
+              if (openshift.raw("get", "is/${APP_NAME}", "-o=jsonpath=\'{.spec.tags[?(@.name==\"prd\")].name}'").out.trim() != 'hml') {
+                echo 'First time creation...'
+                openshift.tag("${HML_PROJECT_NAME}/${APP_NAME}:hml", "${PRD_PROJECT_NAME}/${APP_NAME}:prd")
+                openshift.tag("${PRD_PROJECT_NAME}/${APP_NAME}:prd", "${PRD_PROJECT_NAME}/${APP_NAME}:prd-previous")
+              } else {
+                echo 'Updating tags...'
+                openshift.tag("${PRD_PROJECT_NAME}/${APP_NAME}:prd", "${PRD_PROJECT_NAME}/${APP_NAME}:prd-previous")
+                openshift.tag("${HML_PROJECT_NAME}/${APP_NAME}:hml", "${PRD_PROJECT_NAME}/${APP_NAME}:prd")
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('Create ServiceAccount') {
+      steps {
+        script {
+          openshift.withCluster() {
+            openshift.withProject("${params.PRD_PROJECT_NAME}") {
+              if (!openshift.selector('sa', "${params.APP_NAME}").exists()) {
+                openshift.create('sa', "${params.APP_NAME}")
+              }
+              openshift.raw('policy', 'add-role-to-user', 'view', "system:serviceaccount:${params.PRD_PROJECT_NAME}:${params.APP_NAME}")
+            }
+          }
+        }
+      }
+    }
+    stage('Create PRD') {
+      steps {
+        script {
+          openshift.withCluster() {
+            //openshift.verbose()
+            openshift.withProject("${PRD_PROJECT_NAME}") {
+              if (!openshift.selector('dc', '${APP_NAME}').exists()) {
+                openshift.newApp("springboot-deployconfig", "--name=${APP_NAME}", "-p APP_NAME=${APP_NAME}", 
+                "-p NAMESPACE=${PRD_PROJECT_NAME}", "-p TAG_NAME=prd", "-p SERVICE_ACCOUNT=${params.APP_NAME}")
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('Want to undo promotion?') {
+      steps {
+        script {
+          timeout(time: 5, unit: 'MINUTES') { // change to a convenient timeout for you
+            def userInput = input(id: 'Proceed1', message: 'Want undo promotion?', parameters: [
+              booleanParam(name: 'Yes', defaultValue: false, description: 'Check this if you want to undo this promotion')
+            ])
+
+            if (userInput) {
+              stage('Undoing promotion') {
+                openshift.withCluster() {
+                  //openshift.verbose()
+                  openshift.withProject("${PRD_PROJECT_NAME}") {
+                    openshift.tag("${PRD_PROJECT_NAME}/${APP_NAME}:prd-previous", "${PRD_PROJECT_NAME}/${APP_NAME}:prd")
+                  }
+                }
+              }
+            } else {
+              stage('Finishing') {
+                echo 'Finishing...'
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

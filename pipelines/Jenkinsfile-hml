@@ -1,0 +1,95 @@
+pipeline {
+  parameters {
+    string(name: 'DEV_PROJECT_NAME', description: 'What is the project name?')  
+    string(name: 'HML_PROJECT_NAME', description: 'What is the project name?')
+    string(name: 'APP_NAME', description: 'What is the application name?')
+  }
+  agent any
+  stages {
+    stage('Retrieve Image Stream') {
+      steps {
+        script {
+          openshift.withCluster() {
+            openshift.withProject("${HML_PROJECT_NAME}") {
+              echo "Using project: ${openshift.project()}"
+              openshift.raw("import-image", "${HML_PROJECT_NAME}/${APP_NAME}", "--from=\'docker-registry.default.svc:5000/${DEV_PROJECT_NAME}/${APP_NAME}\'", "--confirm")
+            }
+          }
+        }
+      }
+    }
+    stage('Promote to HML') {
+      steps {
+        script {
+          openshift.withCluster() {
+            openshift.withProject("${HML_PROJECT_NAME}") {
+              if (openshift.raw("get", "is/${APP_NAME}", "-o=jsonpath=\'{.spec.tags[?(@.name==\"hml\")].name}'").out.trim() != 'hml') {
+                echo 'First time creation...'
+                openshift.tag("${DEV_PROJECT_NAME}/${APP_NAME}:latest", "${HML_PROJECT_NAME}/${APP_NAME}:hml")
+                openshift.tag("${HML_PROJECT_NAME}/${APP_NAME}:hml", "${HML_PROJECT_NAME}/${APP_NAME}:hml-previous")
+              } else {
+                echo 'Updating tags...'
+                openshift.tag("${HML_PROJECT_NAME}/${APP_NAME}:hml", "${HML_PROJECT_NAME}/${APP_NAME}:hml-previous")
+                openshift.tag("${DEV_PROJECT_NAME}/${APP_NAME}:latest", "${HML_PROJECT_NAME}/${APP_NAME}:hml")
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('Create ServiceAccount') {
+      steps {
+        script {
+          openshift.withCluster() {
+            openshift.withProject("${params.HML_PROJECT_NAME}") {
+              if (!openshift.selector('sa', "${params.APP_NAME}").exists()) {
+                openshift.create('sa', "${params.APP_NAME}")
+              }
+              openshift.raw('policy', 'add-role-to-user', 'view', "system:serviceaccount:${params.HML_PROJECT_NAME}:${params.APP_NAME}")
+            }
+          }
+        }
+      }
+    }
+    stage('Create HML') {
+      steps {
+        script {
+          openshift.withCluster() {
+            openshift.withProject("${HML_PROJECT_NAME}") {
+              if (!openshift.selector('dc', '${APP_NAME}').exists()) {
+                openshift.newApp("springboot-deployconfig", "--name=${APP_NAME}", "-p APP_NAME=${APP_NAME}", 
+                "-p NAMESPACE=${HML_PROJECT_NAME}", "-p TAG_NAME=hml", "-p SERVICE_ACCOUNT=${params.APP_NAME}")
+              }
+            }
+          }
+        }
+      }
+    }
+    stage('Want to undo promotion?') {
+      steps {
+        script {
+          timeout(time: 5, unit: 'MINUTES') { // change to a convenient timeout for you
+            def userInput = input(id: 'Proceed1', message: 'Want undo promotion?', parameters: [
+              booleanParam(name: 'Yes', defaultValue: false, description: 'Check this if you want to undo this promotion')
+            ])
+
+            if (userInput) {
+              stage('Undoing promotion') {
+                openshift.withCluster() {
+      
+                  openshift.withProject("${HML_PROJECT_NAME}") {
+                    openshift.tag("${HML_PROJECT_NAME}/${APP_NAME}:hml-previous", "${HML_PROJECT_NAME}/${APP_NAME}:hml")
+                  }
+                }
+              }
+            } else {
+              stage('Finishing') {
+                echo 'Finishing...'
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: springboot-pipeline-hml
+metadata:
+  annotations:
+    description: Pipeline Hml SpringBoot S2I
+    iconClass: icon-jenkins
+    tags: java,springboot,jenkins,hml
+  creationTimestamp: null
+  name: springboot-pipeline-hml
+objects:
+  - apiVersion: v1
+    kind: BuildConfig
+    metadata:
+      name: ${APP_NAME}-pipeline-hml
+    spec:
+      source:
+        git:
+          uri: ${GIT_REPO_PIPELINE}
+        type: Git
+      strategy:
+        jenkinsPipelineStrategy:
+          jenkinsfilePath: Jenkinsfile-hml
+          env:
+          - name: DEV_PROJECT_NAME
+            value: ${BASE_PROJECT_NAME}-dev
+          - name: HML_PROJECT_NAME
+            value: ${BASE_PROJECT_NAME}-hml
+          - name: APP_NAME
+            value: ${APP_NAME}
+      output: 
+        to:
+          kind: ImageStreamTag
+          name: ${APP_NAME}:latest
+parameters:
+- description: The base project name
+  displayName: Base project name
+  name: BASE_PROJECT_NAME
+  required: true
+- description: The name assigned to the application.
+  displayName: Application Name
+  name: APP_NAME
+  required: true
+- description: Git pipeline repository.
+  displayName: Git pipeline repository.
+  name: GIT_REPO_PIPELINE
+  required: true
