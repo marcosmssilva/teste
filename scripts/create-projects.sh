@@ -1,7 +1,7 @@
     #!/bin/sh
 
     JENKINS_PROJECT_NAME=cicd-tools
-
+    BASE_PROJECT_NAME=teste123
     invalid() {
         echo "Error: Invalid parameters!"
         echo

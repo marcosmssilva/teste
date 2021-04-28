@@ -5,8 +5,8 @@ BASE_PROJECT_NAME=redhat
 # source ./create-projects.sh
 
 APP_NAME=sample
-GIT_REPO_URL=http://gogs-cicd-tools.apps.brazil01.lab.upshift.rdu2.redhat.com/desenv/app-s2i.git
-GIT_REPO_PIPELINE=http://gogs-cicd-tools.apps.brazil01.lab.upshift.rdu2.redhat.com/infra/pipelines.git
+GIT_REPO_URL=https://github.com/openshift-s2i/s2i-go.git
+GIT_REPO_PIPELINE=https://github.com/marcosmssilva/teste.git
 
 source ./create-app.sh
 
